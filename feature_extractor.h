@@ -20,6 +20,8 @@ public:
     void remove_outside( std::vector<cv::KeyPoint>& keypoints,const int width, const int height, const int border_value);
     Eigen::MatrixXd get_keypoints();
     Eigen::MatrixXd detect_interest_points(Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> image, bool use_orb_slam);
+    std::vector<int> adaptive_non_maximum_suppression(Eigen::MatrixXd pointLocation, int numInPoints, int numRetPoints, float tolerance, int cols, int rows);
+    //void adaptive_non_maximum_suppression(Eigen::MatrixXd pointLocation, int numInPoints, int numRetPoints, float tolerance, int cols, int rows);
     Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> detect_and_compute(Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> image, bool use_orb_slam, bool use_latch);
     //void FeatureExtractor::detect_and_compute(cv::Mat &image,std::vector<cv::KeyPoint> &keypoints,bool use_orb_slam, bool use_latch);
 };

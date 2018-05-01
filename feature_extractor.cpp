@@ -237,6 +237,146 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_
 	return eigen_desc;
 }
 
+// Eigen::Matrix<uint8_t, Eigen::Dynamic, 1> 
+// Points are assumed to be sorted prior to this function. 
+std::vector<int> FeatureExtractor::adaptive_non_maximum_suppression(Eigen::MatrixXd pointLocation, int numInPoints, int numRetPoints, float tolerance, int cols, int rows){
+//void FeatureExtractor::adaptive_non_maximum_suppression(Eigen::MatrixXd pointLocation, int numInPoints, int numRetPoints, float tolerance, int cols, int rows){
+	//std::cout << "Function called successfully " << std::endl;
+	//std::cout << "STEP0 " << std::endl;
+    // several temp expression variables to simplify solution equation
+    int exp1 = rows + cols + 2*numRetPoints;
+    long long exp2 = ((long long) 4*cols + (long long)4*numRetPoints + (long long)4*rows*numRetPoints + (long long)rows*rows + (long long) cols*cols - (long long)2*rows*cols + (long long)4*rows*cols*numRetPoints);
+    double exp3 = sqrt(double(exp2));
+    double exp4 = (2*(numRetPoints - 1));
+
+    double sol1 = -round((exp1+exp3)/exp4); // first solution
+    double sol2 = -round((exp1-exp3)/exp4); // second solution
+
+    double high = (sol1>sol2)? sol1 : sol2; //binary search range initialization with positive solution
+    double low = floor(sqrt((double)numInPoints/numRetPoints));
+
+    double width;
+    int prevWidth = -1;
+	//std::cout << "STEP0 " << std::endl;
+    std::vector<int> ResultVec;
+    bool complete = false;
+    unsigned int K = numRetPoints; 
+	unsigned int Kmin = round(K-(K*tolerance)); 
+	unsigned int Kmax = round(K+(K*tolerance));
+    
+    std::vector<int> result; 
+	result.reserve(numInPoints);
+	
+	//std::cout <<  exp1 << ", " <<  exp2 << ", " <<  exp3 << ", " << exp4 << ", " << sol1 << ", " << sol2 << ", " << high << ", " << low << ", " << K << ", " << Kmin << ", " << Kmax << std::endl;
+
+    while(!complete){
+        width = low+(high-low)/2;
+        if (width == prevWidth || low>high) { //needed to reassure the same radius is not repeated again
+            ResultVec = result; //return the keypoints from the previous iteration
+            break;
+        }
+        result.clear();
+        double c = width/2; //initializing Grid
+        int numCellCols = floor(cols/c);
+        int numCellRows = floor(rows/c);
+		
+        std::vector<std::vector<bool> > coveredVec(numCellRows+1,std::vector<bool>(numCellCols+1,false));
+		
+		//std::cout <<  width << ", " <<  low << ", " <<  high << ", " << c << ", " << numCellCols << ", " << numCellRows  << std::endl;
+
+        for (unsigned int i=0;i<numInPoints;++i){
+			int row = floor(pointLocation(i,0)/c); //get position of the cell current point is located at
+            int col = floor(pointLocation(i,1)/c);
+			/*if (i < 10){
+				std::cout <<  row << ", " <<  col << std::endl;
+			}*/
+			
+            if (coveredVec[row][col]==false){ // if the cell is not covered
+                result.push_back(i);
+                int rowMin = ((row-floor(width/c))>=0)? (row-floor(width/c)) : 0; //get range which current radius is covering
+                int rowMax = ((row+floor(width/c))<=numCellRows)? (row+floor(width/c)) : numCellRows;
+                int colMin = ((col-floor(width/c))>=0)? (col-floor(width/c)) : 0;
+                int colMax = ((col+floor(width/c))<=numCellCols)? (col+floor(width/c)) : numCellCols;
+                for (int rowToCov=rowMin; rowToCov<=rowMax; ++rowToCov){
+                    for (int colToCov=colMin ; colToCov<=colMax; ++colToCov){
+                        if (!coveredVec[rowToCov][colToCov]) coveredVec[rowToCov][colToCov] = true; //cover cells within the square bounding box with width w
+                    }
+                }
+            }
+        }
+        if (result.size()>=Kmin && result.size()<=Kmax){ //solution found
+            ResultVec = result;
+            complete = true;
+			//std::cout << "STEP END0 " << std::endl;
+        }
+        else if (result.size()<Kmin) high = width-1; //update binary search range
+        else low = width+1;
+        prevWidth = width;
+    }
+	//std::cout << "STEP END1 " << std::endl;
+    return ResultVec;
+}
+
+/*std::vector<int> SSC(double *pointLocation, int numInPoints, int numRetPoints, float tolerance, int cols, int rows){
+    // several temp expression variables to simplify solution equation
+    int exp1 = rows + cols + 2*numRetPoints;
+    long long exp2 = ((long long) 4*cols + (long long)4*numRetPoints + (long long)4*rows*numRetPoints + (long long)rows*rows + (long long) cols*cols - (long long)2*rows*cols + (long long)4*rows*cols*numRetPoints);
+    double exp3 = sqrt(exp2);
+    double exp4 = (2*(numRetPoints - 1));
+
+    double sol1 = -round((exp1+exp3)/exp4); // first solution
+    double sol2 = -round((exp1-exp3)/exp4); // second solution
+
+    int high = (sol1>sol2)? sol1 : sol2; //binary search range initialization with positive solution
+    int low = floor(sqrt((double)numInPoints/numRetPoints));
+
+    int width;
+    int prevWidth = -1;
+
+    std::vector<int> ResultVec;
+    bool complete = false;
+    unsigned int K = numRetPoints; unsigned int Kmin = round(K-(K*tolerance)); unsigned int Kmax = round(K+(K*tolerance));
+    
+    std::vector<int> result; result.reserve(numInPoints);
+    while(!complete){
+        width = low+(high-low)/2;
+        if (width == prevWidth || low>high) { //needed to reassure the same radius is not repeated again
+            ResultVec = result; //return the keypoints from the previous iteration
+            break;
+        }
+        result.clear();
+        double c = width/2; //initializing Grid
+        int numCellCols = floor(cols/c);
+        int numCellRows = floor(rows/c);
+        std::vector<std::vector<bool> > coveredVec(numCellRows+1,std::vector<bool>(numCellCols+1,false));
+
+        for (unsigned int i=0;i<numInPoints;++i){
+            int row = floor(pointLocation[i+numInPoints]/c); //get position of the cell current point is located at
+            int col = floor(pointLocation[i]/c);
+            if (coveredVec[row][col]==false){ // if the cell is not covered
+                result.push_back(i);
+                int rowMin = ((row-floor(width/c))>=0)? (row-floor(width/c)) : 0; //get range which current radius is covering
+                int rowMax = ((row+floor(width/c))<=numCellRows)? (row+floor(width/c)) : numCellRows;
+                int colMin = ((col-floor(width/c))>=0)? (col-floor(width/c)) : 0;
+                int colMax = ((col+floor(width/c))<=numCellCols)? (col+floor(width/c)) : numCellCols;
+                for (int rowToCov=rowMin; rowToCov<=rowMax; ++rowToCov){
+                    for (int colToCov=colMin ; colToCov<=colMax; ++colToCov){
+                        if (!coveredVec[rowToCov][colToCov]) coveredVec[rowToCov][colToCov] = true; //cover cells within the square bounding box with width w
+                    }
+                }
+            }
+        }
+        if (result.size()>=Kmin && result.size()<=Kmax){ //solution found
+            ResultVec = result;
+            complete = true;
+        }
+        else if (result.size()<Kmin) high = width-1; //update binary search range
+        else low = width+1;
+        prevWidth = width;
+    }
+    return ResultVec;
+}*/
+
 int main(int argc, const char * argv[]) {
 	// ------------- Configuration ------------
 	//constexpr int warmups = 30;
