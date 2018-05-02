@@ -74,37 +74,41 @@
 using namespace std::chrono;
 using namespace ORB_EXTRACTOR;
 
-
-FeatureExtractor::FeatureExtractor(int n_keypoints, float scale_factor, int n_levels, int threshold_fast){
-	//int n_keypoints = 2000;
-	//float scale_factor = 1.2f;
-	//int n_levels = 8;
-	int _iniThFAST = 20;
-	int _minThFAST = 7;
-	int edge_treshold = 36; 
-	orb_slam = new ORBextractor(n_keypoints, scale_factor, n_levels,_iniThFAST, _minThFAST);
-	orb = cv::ORB::create(n_keypoints, scale_factor, n_levels, edge_treshold, 0, 2, cv::ORB::HARRIS_SCORE, 31, _iniThFAST);
-	orb->setMaxFeatures(n_keypoints);
-
-	
+FeatureExtractor::FeatureExtractor(int n_keypoints, float scale_factor, int n_levels, int threshold_high, int threshold_low, int interest_point_detector_type, int keypoint_search_multiplier){
+	//int edge_treshold = 36; 
+	int edge_treshold =  31;
+	_interest_point_detector_type = interest_point_detector_type;
+	_n_keypoints = n_keypoints;
+	if(_interest_point_detector_type == 0){
+		orb = cv::ORB::create(n_keypoints, scale_factor, n_levels, edge_treshold, 0, 2, cv::ORB::HARRIS_SCORE, 31, threshold_high);
+	}
+	else if(_interest_point_detector_type == 1){
+		orb = cv::ORB::create(n_keypoints*keypoint_search_multiplier, scale_factor, n_levels, edge_treshold, 0, 2, cv::ORB::HARRIS_SCORE, 31, threshold_low);
+	}
+	else if(_interest_point_detector_type == 2){
+		orb_slam = new ORBextractor(n_keypoints, scale_factor, n_levels,threshold_high, threshold_low);
+	}
+	//orb->setMaxFeatures(n_keypoints);
 }
 
-Eigen::MatrixXd FeatureExtractor::detect_interest_points(Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> eigen_image, bool use_orb_slam)
+Eigen::MatrixXd FeatureExtractor::detect_interest_points(Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> eigen_image)
 {	
 	//cv::Mat cv_image(image.rows(),image.cols(),CV_8UC1);
 	cv::eigen2cv(eigen_image,_cv_image);	
 	
-	if(use_orb_slam){
-		(*FeatureExtractor::orb_slam)(_cv_image, _keypoints);
-	}
-	else {
+	if((_interest_point_detector_type == 0) || (_interest_point_detector_type == 1)){
 		FeatureExtractor::orb->detect(_cv_image, _keypoints);
+
+		if (_interest_point_detector_type == 1){
+			internal_adaptive_non_maximum_suppression();
+		}
+	}
+	else if (_interest_point_detector_type == 2) {
+		(*FeatureExtractor::orb_slam)(_cv_image, _keypoints);
 	}
 
 	// Remove points close to the border 
-	remove_outside(_keypoints,_cv_image.cols,_cv_image.rows,36);
-
-	//std::cout << "n_keypoints: " << _keypoints.size() << std::endl; 
+	//remove_outside(_keypoints,_cv_image.cols,_cv_image.rows,36);
 	
 	// x,y,scale, angle, response
 	Eigen::MatrixXd interest_points(5,_keypoints.size());
@@ -202,7 +206,7 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::compute
 	return eigen_desc;
 }
 
-Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_and_compute(Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> eigen_image, bool use_orb_slam, bool use_latch)
+Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_and_compute(Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> eigen_image, bool use_latch)
 {	
 	cv::eigen2cv(eigen_image,_cv_image);
 	
@@ -210,23 +214,33 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_
 
 	// 
 	if (use_latch == false) {
-		cv::Mat cv_desc;
-		if (use_orb_slam){
-			(*FeatureExtractor::orb_slam)(_cv_image, cv::noArray(),_keypoints,cv_desc);
-		}
-		else {
+		if (_interest_point_detector_type==0){
+			cv::Mat cv_desc;
 			FeatureExtractor::orb->detectAndCompute(_cv_image, cv::noArray(), _keypoints,cv_desc);
+			cv::cv2eigen(cv_desc,eigen_desc);
 		}
-		
-		cv::cv2eigen(cv_desc,eigen_desc);
+		else if (_interest_point_detector_type==1){
+			FeatureExtractor::orb->detect(_cv_image, _keypoints);
+			internal_adaptive_non_maximum_suppression();
+			eigen_desc = compute_descriptor(false);
+		}
+		else if (_interest_point_detector_type==2){
+			cv::Mat cv_desc;
+			(*FeatureExtractor::orb_slam)(_cv_image, cv::noArray(),_keypoints,cv_desc);
+			cv::cv2eigen(cv_desc,eigen_desc);
+		}
 	}
 	// Latch-based
 	else {
-		if (use_orb_slam){
-			(*FeatureExtractor::orb_slam)(_cv_image,_keypoints);
-		}
-		else{
+		if((_interest_point_detector_type == 0) || (_interest_point_detector_type == 1)){
 			FeatureExtractor::orb->detect(_cv_image, _keypoints);
+
+			if (_interest_point_detector_type == 1){
+				internal_adaptive_non_maximum_suppression();
+			}
+		}
+		else if (_interest_point_detector_type == 2) {
+			(*FeatureExtractor::orb_slam)(_cv_image, _keypoints);
 		}
 		// Bug fixing
 		remove_outside(_keypoints,_cv_image.cols,_cv_image.rows,36);
@@ -237,13 +251,22 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_
 	return eigen_desc;
 }
 
-// Eigen::Matrix<uint8_t, Eigen::Dynamic, 1> 
-// Points are assumed to be sorted prior to this function. 
-std::vector<int> FeatureExtractor::adaptive_non_maximum_suppression(Eigen::MatrixXd pointLocation, int numInPoints, int numRetPoints, float tolerance, int cols, int rows){
+void FeatureExtractor::internal_adaptive_non_maximum_suppression(){
 //void FeatureExtractor::adaptive_non_maximum_suppression(Eigen::MatrixXd pointLocation, int numInPoints, int numRetPoints, float tolerance, int cols, int rows){
 	//std::cout << "Function called successfully " << std::endl;
 	//std::cout << "STEP0 " << std::endl;
     // several temp expression variables to simplify solution equation
+	//std::cout << "pointLocation.size " << pointLocation.rows <<  std::endl;
+	//std::vector<cv::KeyPoint> keypoints, int numRetPoints, float tolerance, int cols, int rows
+	
+	// Sort points according to response. 
+	std::sort(_keypoints.begin(), _keypoints.end(), [](cv::KeyPoint a, cv::KeyPoint b) { return a.response > b.response; });
+
+	float tolerance = 0.1f;
+	int cols = _cv_image.cols;
+	int rows = _cv_image.rows;
+	int numInPoints = _keypoints.size();
+	int numRetPoints = _n_keypoints;
     int exp1 = rows + cols + 2*numRetPoints;
     long long exp2 = ((long long) 4*cols + (long long)4*numRetPoints + (long long)4*rows*numRetPoints + (long long)rows*rows + (long long) cols*cols - (long long)2*rows*cols + (long long)4*rows*cols*numRetPoints);
     double exp3 = sqrt(double(exp2));
@@ -281,15 +304,11 @@ std::vector<int> FeatureExtractor::adaptive_non_maximum_suppression(Eigen::Matri
         int numCellRows = floor(rows/c);
 		
         std::vector<std::vector<bool> > coveredVec(numCellRows+1,std::vector<bool>(numCellCols+1,false));
-		
-		//std::cout <<  width << ", " <<  low << ", " <<  high << ", " << c << ", " << numCellCols << ", " << numCellRows  << std::endl;
 
         for (unsigned int i=0;i<numInPoints;++i){
-			int row = floor(pointLocation(i,0)/c); //get position of the cell current point is located at
-            int col = floor(pointLocation(i,1)/c);
-			/*if (i < 10){
-				std::cout <<  row << ", " <<  col << std::endl;
-			}*/
+			int row = floor(_keypoints[i].pt.y/c); //get position of the cell current point is located at
+            int col = floor(_keypoints[i].pt.x/c);
+
 			
             if (coveredVec[row][col]==false){ // if the cell is not covered
                 result.push_back(i);
@@ -313,69 +332,17 @@ std::vector<int> FeatureExtractor::adaptive_non_maximum_suppression(Eigen::Matri
         else low = width+1;
         prevWidth = width;
     }
+
+	// 
+	std::vector<cv::KeyPoint> tmpKeypoints;
 	//std::cout << "STEP END1 " << std::endl;
-    return ResultVec;
+	for(std::vector<int>::iterator it = ResultVec.begin(); it != ResultVec.end(); ++it) {
+     	tmpKeypoints.push_back(_keypoints[*it]);
+	}
+	_keypoints = tmpKeypoints;
 }
 
-/*std::vector<int> SSC(double *pointLocation, int numInPoints, int numRetPoints, float tolerance, int cols, int rows){
-    // several temp expression variables to simplify solution equation
-    int exp1 = rows + cols + 2*numRetPoints;
-    long long exp2 = ((long long) 4*cols + (long long)4*numRetPoints + (long long)4*rows*numRetPoints + (long long)rows*rows + (long long) cols*cols - (long long)2*rows*cols + (long long)4*rows*cols*numRetPoints);
-    double exp3 = sqrt(exp2);
-    double exp4 = (2*(numRetPoints - 1));
 
-    double sol1 = -round((exp1+exp3)/exp4); // first solution
-    double sol2 = -round((exp1-exp3)/exp4); // second solution
-
-    int high = (sol1>sol2)? sol1 : sol2; //binary search range initialization with positive solution
-    int low = floor(sqrt((double)numInPoints/numRetPoints));
-
-    int width;
-    int prevWidth = -1;
-
-    std::vector<int> ResultVec;
-    bool complete = false;
-    unsigned int K = numRetPoints; unsigned int Kmin = round(K-(K*tolerance)); unsigned int Kmax = round(K+(K*tolerance));
-    
-    std::vector<int> result; result.reserve(numInPoints);
-    while(!complete){
-        width = low+(high-low)/2;
-        if (width == prevWidth || low>high) { //needed to reassure the same radius is not repeated again
-            ResultVec = result; //return the keypoints from the previous iteration
-            break;
-        }
-        result.clear();
-        double c = width/2; //initializing Grid
-        int numCellCols = floor(cols/c);
-        int numCellRows = floor(rows/c);
-        std::vector<std::vector<bool> > coveredVec(numCellRows+1,std::vector<bool>(numCellCols+1,false));
-
-        for (unsigned int i=0;i<numInPoints;++i){
-            int row = floor(pointLocation[i+numInPoints]/c); //get position of the cell current point is located at
-            int col = floor(pointLocation[i]/c);
-            if (coveredVec[row][col]==false){ // if the cell is not covered
-                result.push_back(i);
-                int rowMin = ((row-floor(width/c))>=0)? (row-floor(width/c)) : 0; //get range which current radius is covering
-                int rowMax = ((row+floor(width/c))<=numCellRows)? (row+floor(width/c)) : numCellRows;
-                int colMin = ((col-floor(width/c))>=0)? (col-floor(width/c)) : 0;
-                int colMax = ((col+floor(width/c))<=numCellCols)? (col+floor(width/c)) : numCellCols;
-                for (int rowToCov=rowMin; rowToCov<=rowMax; ++rowToCov){
-                    for (int colToCov=colMin ; colToCov<=colMax; ++colToCov){
-                        if (!coveredVec[rowToCov][colToCov]) coveredVec[rowToCov][colToCov] = true; //cover cells within the square bounding box with width w
-                    }
-                }
-            }
-        }
-        if (result.size()>=Kmin && result.size()<=Kmax){ //solution found
-            ResultVec = result;
-            complete = true;
-        }
-        else if (result.size()<Kmin) high = width-1; //update binary search range
-        else low = width+1;
-        prevWidth = width;
-    }
-    return ResultVec;
-}*/
 
 int main(int argc, const char * argv[]) {
 	// ------------- Configuration ------------
@@ -465,7 +432,7 @@ int main(int argc, const char * argv[]) {
 	cv::cv2eigen(image,eig_image);
 	t0 = high_resolution_clock::now();
 	for (int i = 0; i < n_runs; ++i){
-		feature_extractor.detect_interest_points(eig_image,false);
+		feature_extractor.detect_interest_points(eig_image);
 	}
 	t1 = high_resolution_clock::now();
 
