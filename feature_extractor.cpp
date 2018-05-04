@@ -209,14 +209,18 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::compute
 Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_and_compute(Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> eigen_image, bool use_latch)
 {	
 	cv::eigen2cv(eigen_image,_cv_image);
-	
 	Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> eigen_desc;
 
-	// 
 	if (use_latch == false) {
 		if (_interest_point_detector_type==0){
 			cv::Mat cv_desc;
 			FeatureExtractor::orb->detectAndCompute(_cv_image, cv::noArray(), _keypoints,cv_desc);
+			
+			// Return for no interest point.
+			if(cv_desc.rows == 0){	
+				_keypoints.clear();
+				return eigen_desc;
+			}
 			cv::cv2eigen(cv_desc,eigen_desc);
 		}
 		else if (_interest_point_detector_type==1){
@@ -227,10 +231,16 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_
 		else if (_interest_point_detector_type==2){
 			cv::Mat cv_desc;
 			(*FeatureExtractor::orb_slam)(_cv_image, cv::noArray(),_keypoints,cv_desc);
+
+			// Return for no interest point.
+			if(cv_desc.rows == 0){
+				_keypoints.clear();
+				return eigen_desc;
+			}
 			cv::cv2eigen(cv_desc,eigen_desc);
 		}
 	}
-	// Latch-based
+	// Latch-based (CURRENTLY NOT WORKING)
 	else {
 		if((_interest_point_detector_type == 0) || (_interest_point_detector_type == 1)){
 			FeatureExtractor::orb->detect(_cv_image, _keypoints);
