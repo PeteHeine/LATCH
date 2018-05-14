@@ -9,9 +9,26 @@ ENDIF()
 #MESSAGE("Build type: " ${CMAKE_BUILD_TYPE})
 if ( CMAKE_COMPILER_IS_GNUCC )
 # -Wall -Wextra -Werror -Wshadow -pedantic -Ofast -std=gnu++17 -fomit-frame-pointer -mavx2 -march=native -mfma -flto -funroll-all-loops -fpeel-loops -ftracer -ftree-vectorize
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}  -Wall -m64 -O3 -march=native ")
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wshadow -pedantic -Ofast -std=gnu++17 -fomit-frame-pointer -mavx2 -march=native -mfma -flto -funroll-all-loops -fpeel-loops -ftracer -ftree-vectorize")
+
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}  -Wall -O3")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wshadow -pedantic -Ofast -std=gnu++17 -fomit-frame-pointer -march=native -flto -funroll-all-loops -fpeel-loops -ftracer -ftree-vectorize")
 	set(THREADS_PREFER_PTHREAD_FLAG ON)
+
+
+
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}  -Wall -O3")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -O3 -std=c++11")	
+	if ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "x86_64")
+		message("CPU: x86_64")
+		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m64 -march=native ")
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m64 -march=native  -mavx2  -mfma")
+	elseif ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "aarch64")
+		message("CPU: aarch64")
+		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=armv8-a ")
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv8-a")
+	else()
+		message(FATAL_ERROR "Specify flags for processor type: " ${CMAKE_SYSTEM_PROCESSOR} )
+	endif()
 endif()
 if ( MSVC )
 	# FLAGS

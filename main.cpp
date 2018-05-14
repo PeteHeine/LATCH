@@ -51,7 +51,9 @@
 #include <vector>
 //#include <Eigen/Core>
 
-#include "latch.h"
+#ifdef USE_LATCH
+	#include "latch.h"
+#endif
 
 #define VC_EXTRALEAN
 #define WIN32_LEAN_AND_MEAN
@@ -114,7 +116,7 @@ int main(int argc, char **argv) {
 	orb->detect(image1, keypoints1);
 	// -------------------------------
 	
-
+#ifdef USE_LATCH
 	// ------------- LATCH feature descriptor  ------------
 	// IMPORTANT LINES to later draw the correspondes correctly. The opencv draw 
 	// function requires vector<cv::KeyPoint> and Latch uses a vector<KeyPoint> (defined in LATCH.h).
@@ -208,7 +210,7 @@ int main(int argc, char **argv) {
 
 	std::cout << "LATCH: Descriptors size: " << cv_desc0_latch.size() << ", Good matches: " << good_matches_latch.size() << "(treshold " << threshold_latch << ")"  << std::endl;
 
-
+#endif
 	cv::waitKey(0);
 
 }

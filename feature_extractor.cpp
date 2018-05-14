@@ -65,7 +65,11 @@
 
 #include <vector>
 
-#include "latch.h"
+// #define USE_LATCH
+#ifdef USE_LATCH
+	#include "latch.h"
+#endif
+
 #include "feature_extractor.h"
 
 #define VC_EXTRALEAN
@@ -145,6 +149,7 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::compute
 	const int n_found_kp = (int)(_keypoints.size());
 	constexpr bool multithread = true;
 	Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> eigen_desc;
+#ifdef USE_LATCH
 	if(use_latch){
 
 		// Using cv::Mat. Smart when using opencv. ///////////////////////////////////////////
@@ -200,7 +205,12 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::compute
 		orb->compute(_cv_image, _keypoints,cv_desc);
 		cv::cv2eigen(cv_desc,eigen_desc);
 	}
+#else
+	cv::Mat cv_desc;
+	orb->compute(_cv_image, _keypoints,cv_desc);
+	cv::cv2eigen(cv_desc,eigen_desc);
 
+#endif
 	
 	
 	return eigen_desc;
@@ -408,7 +418,7 @@ int main(int argc, const char * argv[]) {
 	std::cout << "Interst Point detector and descriptor (jointed - opencv): " << static_cast<double>((t1 - t0).count()) / (double)(n_runs) * 1e-6 <<  "ms" << std::endl;
 	// -----------------------------------------------------------
 
-
+#ifdef USE_LATCH
 	// ------------- LATCH ------------
 	uint64_t* desc = new uint64_t[8 * keypoints.size()];
 	// For testing... Force values to zero. 
@@ -478,6 +488,6 @@ int main(int argc, const char * argv[]) {
 	long long total = 0;
 	for (size_t i = 0; i < 8 * keypoints_class.size(); ++i) total += desc[i];
 	std::cout << "Checksum: " << std::hex << total << std::endl << std::endl;
-
+#endif
 	
 }
