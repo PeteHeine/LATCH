@@ -48,6 +48,7 @@
 #include <vector>
 #include <iostream>
 #include <Eigen/LU>
+#include <stdexcept>
 #include <opencv2/core/eigen.hpp>
 //#include <opencv2/core/eigen.hpp>
 #include <opencv2/opencv.hpp>
@@ -149,8 +150,9 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::compute
 	const int n_found_kp = (int)(_keypoints.size());
 	constexpr bool multithread = true;
 	Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> eigen_desc;
-#ifdef USE_LATCH
+
 	if(use_latch){
+#ifdef USE_LATCH
 
 		// Using cv::Mat. Smart when using opencv. ///////////////////////////////////////////
 		/*if(false){
@@ -198,6 +200,10 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::compute
 		// ASSERTION: The LATCH function will remove keypoints close to the border. This must be avoided
 		// as this will create a mismatch between the index of descriptors and keypoints. 
 		assert(!(n_found_kp==_keypoints.size()) && "The LATCH function have remove keypoints close to the border. This must be avoided as this will create a mismatch between the index of descriptors and keypoints." );
+#else
+		
+	        throw std::invalid_argument( "LATCH NOT WORKING FOR ARM" );
+#endif
 
 	}
 	else {
@@ -205,12 +211,6 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::compute
 		orb->compute(_cv_image, _keypoints,cv_desc);
 		cv::cv2eigen(cv_desc,eigen_desc);
 	}
-#else
-	cv::Mat cv_desc;
-	orb->compute(_cv_image, _keypoints,cv_desc);
-	cv::cv2eigen(cv_desc,eigen_desc);
-
-#endif
 	
 	
 	return eigen_desc;
