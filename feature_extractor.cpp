@@ -79,7 +79,13 @@
 using namespace std::chrono;
 using namespace ORB_EXTRACTOR;
 
-FeatureExtractor::FeatureExtractor(int n_keypoints, float scale_factor, int n_levels, int threshold_high, int threshold_low, int interest_point_detector_type, int keypoint_search_multiplier){
+FeatureExtractor::FeatureExtractor(int n_keypoints, 
+								   float scale_factor, 
+								   int n_levels, 
+								   int threshold_high, 
+								   int threshold_low, 
+								   int interest_point_detector_type, 
+								   int keypoint_search_multiplier){
 	//int edge_treshold = 36; 
 	int edge_treshold =  31;
 	_interest_point_detector_type = interest_point_detector_type;
@@ -93,16 +99,31 @@ FeatureExtractor::FeatureExtractor(int n_keypoints, float scale_factor, int n_le
 	else if(_interest_point_detector_type == 2){
 		orb_slam = new ORBextractor(n_keypoints, scale_factor, n_levels,threshold_high, threshold_low);
 	}
+
+	// if((mask.cols() == 1) && (mask.rows() == 1)){
+	// 	std::cout << "Mask not defined" << std::endl;
+		
+	// }
+	// else{
+	// 	std::cout << "Mask defined" << std::endl;
+		
+	// }
+	
+	
+	
 	//orb->setMaxFeatures(n_keypoints);
 }
-
+void FeatureExtractor::set_mask(Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> mask){
+	cv::eigen2cv(mask, _cv_mask);
+}
 Eigen::MatrixXd FeatureExtractor::detect_interest_points(Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> eigen_image)
 {	
 	//cv::Mat cv_image(image.rows(),image.cols(),CV_8UC1);
-	cv::eigen2cv(eigen_image,_cv_image);	
+	cv::eigen2cv(eigen_image, _cv_image);	
 	
 	if((_interest_point_detector_type == 0) || (_interest_point_detector_type == 1)){
-		FeatureExtractor::orb->detect(_cv_image, _keypoints);
+		
+		FeatureExtractor::orb->detect(_cv_image, _keypoints, _cv_mask);
 
 		if (_interest_point_detector_type == 1){
 			internal_adaptive_non_maximum_suppression();
@@ -224,7 +245,7 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_
 	if (use_latch == false) {
 		if (_interest_point_detector_type==0){
 			cv::Mat cv_desc;
-			FeatureExtractor::orb->detectAndCompute(_cv_image, cv::noArray(), _keypoints,cv_desc);
+			FeatureExtractor::orb->detectAndCompute(_cv_image, _cv_mask, _keypoints,cv_desc);
 			
 			// Return for no interest point.
 			if(cv_desc.rows == 0){	
@@ -234,7 +255,12 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_
 			cv::cv2eigen(cv_desc,eigen_desc);
 		}
 		else if (_interest_point_detector_type==1){
-			FeatureExtractor::orb->detect(_cv_image, _keypoints);
+			FeatureExtractor::orb->detect(_cv_image, _keypoints,_cv_mask);
+			// Return for no interest point.
+			if(_keypoints.size() == 0){
+				_keypoints.clear();
+				return eigen_desc;
+			}
 			internal_adaptive_non_maximum_suppression();
 			eigen_desc = compute_descriptor(false);
 		}
@@ -253,7 +279,7 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_
 	// Latch-based (CURRENTLY NOT WORKING)
 	else {
 		if((_interest_point_detector_type == 0) || (_interest_point_detector_type == 1)){
-			FeatureExtractor::orb->detect(_cv_image, _keypoints);
+			FeatureExtractor::orb->detect(_cv_image, _keypoints, _cv_mask);
 
 			if (_interest_point_detector_type == 1){
 				internal_adaptive_non_maximum_suppression();
