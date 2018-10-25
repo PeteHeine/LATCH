@@ -1,48 +1,4 @@
-/*******************************************************************
-*   main.cpp
-*   LATCH
-*
-*	Author: Kareem Omar
-*	kareem.omar@uah.edu
-*	https://github.com/komrad36
-*
-*	Last updated Sep 12, 2016
-*******************************************************************/
-//
-// Fastest implementation of the fully scale-
-// and rotation-invariant LATCH 512-bit binary
-// feature descriptor as described in the 2015
-// paper by Levi and Hassner:
-//
-// "LATCH: Learned Arrangements of Three Patch Codes"
-// http://arxiv.org/abs/1501.03719
-//
-// See also the ECCV 2016 Descriptor Workshop paper, of which I am a coauthor:
-//
-// "The CUDA LATCH Binary Descriptor"
-// http://arxiv.org/abs/1609.03986
-//
-// And the original LATCH project's website:
-// http://www.openu.ac.il/home/hassner/projects/LATCH/
-//
-// See my GitHub for the CUDA version, which is extremely fast.
-//
-// My implementation uses multithreading, SSE2/3/4/4.1, AVX, AVX2, and 
-// many many careful optimizations to implement the
-// algorithm as described in the paper, but at great speed.
-// This implementation outperforms the reference implementation by 800%
-// single-threaded or 3200% multi-threaded (!) while exactly matching
-// the reference implementation's output and capabilities.
-//
-// If you do not have AVX2, uncomment the '#define NO_AVX_PLEASE' in LATCH.h to route the code
-// through SSE isntructions only. NOTE THAT THIS IS ABOUT 50% SLOWER.
-// A processor with full AVX2 support is highly recommended.
-//
-// All functionality is contained in the file LATCH.h. This file
-// is simply a sample test harness with example usage and
-// performance testing.
-//
-
+// Copyright (c) EIVA 2018
 #include <bitset>
 #include <chrono>
 #include <vector>
@@ -72,12 +28,20 @@
 #endif
 
 #include "feature_extractor.h"
-
+#include <algorithm>
 #define VC_EXTRALEAN
 #define WIN32_LEAN_AND_MEAN
 
 using namespace std::chrono;
 using namespace ORB_EXTRACTOR;
+const int FeatureExtractor::NUM_GRID_CELLS = 15;  // This number is arbitrary, because 10 is a good number  actual number of cells will be NUM_GRID_CELLS^2
+const int FeatureExtractor::EDGE_THRESHOLD = 31;  // Num pixels ommited in orb extractor
+
+template<typename A,typename B,typename C>
+A clamp(const A& a, const B& lower, const C& upper)
+{
+	return a<lower ? lower : (a > upper ? upper : a);
+}
 
 FeatureExtractor::FeatureExtractor(int n_keypoints, 
 								   float scale_factor, 
@@ -87,31 +51,27 @@ FeatureExtractor::FeatureExtractor(int n_keypoints,
 								   int interest_point_detector_type, 
 								   int keypoint_search_multiplier){
 	//int edge_treshold = 36; 
-	int edge_treshold =  31;
+	
 	_interest_point_detector_type = interest_point_detector_type;
 	_n_keypoints = n_keypoints;
-	if(_interest_point_detector_type == 0){
-		orb = cv::ORB::create(n_keypoints, scale_factor, n_levels, edge_treshold, 0, 2, cv::ORB::HARRIS_SCORE, 31, threshold_high);
-	}
-	else if(_interest_point_detector_type == 1){
-		orb = cv::ORB::create(n_keypoints*keypoint_search_multiplier, scale_factor, n_levels, edge_treshold, 0, 2, cv::ORB::HARRIS_SCORE, 31, threshold_low);
-	}
-	else if(_interest_point_detector_type == 2){
-		orb_slam = new ORBextractor(n_keypoints, scale_factor, n_levels,threshold_high, threshold_low);
+	switch (_interest_point_detector_type) {
+	case 0:
+		break;
+	case 1:
+		n_keypoints = n_keypoints * keypoint_search_multiplier;
+		break;
+	case 2:
+		break;
+	case 3:
+		n_keypoints /= FeatureExtractor::NUM_GRID_CELLS;
+		break;
+	default:
+		throw std::invalid_argument("Such feature detector is not defined change -> interest_point_detector_type");
 	}
 
-	// if((mask.cols() == 1) && (mask.rows() == 1)){
-	// 	std::cout << "Mask not defined" << std::endl;
-		
-	// }
-	// else{
-	// 	std::cout << "Mask defined" << std::endl;
-		
-	// }
-	
-	
-	
-	//orb->setMaxFeatures(n_keypoints);
+	_orbHigh = cv::ORB::create(n_keypoints, scale_factor, n_levels, FeatureExtractor::EDGE_THRESHOLD, 0, 2, cv::ORB::HARRIS_SCORE, 31, threshold_high);
+	_orbLow =   cv::ORB::create(n_keypoints, scale_factor, n_levels, FeatureExtractor::EDGE_THRESHOLD, 0, 2, cv::ORB::HARRIS_SCORE, 31, threshold_low);
+	_orb_slam = new ORBextractor(n_keypoints, scale_factor, n_levels, threshold_high, threshold_low);
 }
 void FeatureExtractor::set_mask(Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> mask){
 	cv::eigen2cv(mask, _cv_mask);
@@ -120,33 +80,28 @@ Eigen::MatrixXd FeatureExtractor::detect_interest_points(Eigen::Matrix<uint8_t, 
 {	
 	//cv::Mat cv_image(image.rows(),image.cols(),CV_8UC1);
 	cv::eigen2cv(eigen_image, _cv_image);	
-	
-	if((_interest_point_detector_type == 0) || (_interest_point_detector_type == 1)){
-		
-		FeatureExtractor::orb->detect(_cv_image, _keypoints, _cv_mask);
-
-		if (_interest_point_detector_type == 1){
-			internal_adaptive_non_maximum_suppression();
-		}
+	switch (_interest_point_detector_type) {
+	case 0:
+		_orbHigh->detect(_cv_image, _keypoints, _cv_mask);
+		break;
+	case 1:
+		_orbLow->detect(_cv_image, _keypoints, _cv_mask);
+		internal_adaptive_non_maximum_suppression();
+		break;
+	case 2:
+		_orb_slam->operator()(_cv_image, _keypoints);
+		break;
+	case 3:
+		inititialze_POI_on_grid();
+		internal_adaptive_non_maximum_suppression();
+		break;
+	default:
+		throw std::invalid_argument("Such feature detector is not defined change -> interest_point_detector_type");
 	}
-	else if (_interest_point_detector_type == 2) {
-		(*FeatureExtractor::orb_slam)(_cv_image, _keypoints);
-	}
-
 	// Remove points close to the border 
 	//remove_outside(_keypoints,_cv_image.cols,_cv_image.rows,36);
-	
-	// x,y,scale, angle, response
-	Eigen::MatrixXd interest_points(5,_keypoints.size());
 
-	for(unsigned int i_kp = 0; i_kp < _keypoints.size(); i_kp++){
-		interest_points(0,i_kp) = _keypoints[i_kp].pt.x;
-		interest_points(1,i_kp) = _keypoints[i_kp].pt.y;
-		interest_points(2,i_kp) = _keypoints[i_kp].size;
-		interest_points(3,i_kp) = _keypoints[i_kp].angle;
-		interest_points(4,i_kp) = _keypoints[i_kp].response;
-	}
-	return interest_points;
+	return get_keypoints();
 }
 
 Eigen::MatrixXd FeatureExtractor::get_keypoints()
@@ -228,9 +183,7 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::compute
 
 	}
 	else {
-		cv::Mat cv_desc;
-		orb->compute(_cv_image, _keypoints,cv_desc);
-		cv::cv2eigen(cv_desc,eigen_desc);
+		
 	}
 	
 	
@@ -241,41 +194,40 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_
 {	
 	cv::eigen2cv(eigen_image,_cv_image);
 	Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> eigen_desc;
-
-	if (use_latch == false) {
-		if (_interest_point_detector_type==0){
-			cv::Mat cv_desc;
-			FeatureExtractor::orb->detectAndCompute(_cv_image, _cv_mask, _keypoints,cv_desc);
-			
-			// Return for no interest point.
-			if(cv_desc.rows == 0){	
-				_keypoints.clear();
-				return eigen_desc;
-			}
-			cv::cv2eigen(cv_desc,eigen_desc);
-		}
-		else if (_interest_point_detector_type==1){
-			FeatureExtractor::orb->detect(_cv_image, _keypoints,_cv_mask);
-			// Return for no interest point.
-			if(_keypoints.size() == 0){
-				_keypoints.clear();
-				return eigen_desc;
-			}
-			internal_adaptive_non_maximum_suppression();
-			eigen_desc = compute_descriptor(false);
-		}
-		else if (_interest_point_detector_type==2){
-			cv::Mat cv_desc;
-			(*FeatureExtractor::orb_slam)(_cv_image, cv::noArray(),_keypoints,cv_desc);
-
-			// Return for no interest point.
-			if(cv_desc.rows == 0){
-				_keypoints.clear();
-				return eigen_desc;
-			}
-			cv::cv2eigen(cv_desc,eigen_desc);
-		}
+	if(use_latch) throw std::invalid_argument("Latch-based (CURRENTLY NOT WORKING)");
+	if (_cv_image.rows != _cv_mask.rows && _cv_image.cols != _cv_mask.cols)
+	{
+		_cv_mask = cv::Mat::ones(_cv_image.rows, _cv_image.cols, _cv_image.type());
 	}
+	cv::Mat cv_desc;
+	switch (_interest_point_detector_type){
+		case 0:
+			_orbHigh->detectAndCompute(_cv_image, _cv_mask, _keypoints, cv_desc);
+			break;
+		case 1:
+			_orbLow->detect(_cv_image, _keypoints, _cv_mask);
+			internal_adaptive_non_maximum_suppression();
+			_orbHigh->compute(_cv_image, _keypoints, cv_desc);
+			break;
+		case 2:
+			_orb_slam->operator()(_cv_image, cv::noArray(),_keypoints,cv_desc);
+			break;
+		case 3:
+			inititialze_POI_on_grid();
+			internal_adaptive_non_maximum_suppression();
+			_orbHigh->compute(_cv_image, _keypoints, cv_desc);
+			break;
+		}
+	if (cv_desc.rows == 0) {
+		_keypoints.clear();
+		return eigen_desc;
+	} else
+	{
+		cv::cv2eigen(cv_desc, eigen_desc);
+		return eigen_desc;
+	}
+	
+#if 0	}
 	// Latch-based (CURRENTLY NOT WORKING)
 	else {
 		if((_interest_point_detector_type == 0) || (_interest_point_detector_type == 1)){
@@ -286,15 +238,15 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_
 			}
 		}
 		else if (_interest_point_detector_type == 2) {
-			(*FeatureExtractor::orb_slam)(_cv_image, _keypoints);
+			(*FeatureExtractor::_orb_slam)(_cv_image, _keypoints);
 		}
 		// Bug fixing
 		remove_outside(_keypoints,_cv_image.cols,_cv_image.rows,36);
 
 		eigen_desc = compute_descriptor(true);
 	}
-	
-	return eigen_desc;
+#endif
+
 }
 
 void FeatureExtractor::internal_adaptive_non_maximum_suppression(){
@@ -304,7 +256,8 @@ void FeatureExtractor::internal_adaptive_non_maximum_suppression(){
     // several temp expression variables to simplify solution equation
 	//std::cout << "pointLocation.size " << pointLocation.rows <<  std::endl;
 	//std::vector<cv::KeyPoint> keypoints, int numRetPoints, float tolerance, int cols, int rows
-	
+	if (_keypoints.size() == 0)
+		return;
 	// Sort points according to response. 
 	std::sort(_keypoints.begin(), _keypoints.end(), [](cv::KeyPoint a, cv::KeyPoint b) { return a.response > b.response; });
 
@@ -388,132 +341,174 @@ void FeatureExtractor::internal_adaptive_non_maximum_suppression(){
 	_keypoints = tmpKeypoints;
 }
 
+void FeatureExtractor::inititialze_POI_on_grid()
+{
+	const int minBorderX = 0;
+	const int minBorderY = 0;
+	const int maxBorderX = _cv_image.cols;
+	const int maxBorderY = _cv_image.rows;
+	_keypoints.clear();
+	_keypoints.reserve(_n_keypoints * 10); // intial speed up on resize
+	const double width = (maxBorderX - minBorderX);
+	const double height = (maxBorderY - minBorderY);
+	const int nCols =  FeatureExtractor::NUM_GRID_CELLS;
+	const int nRows =  FeatureExtractor::NUM_GRID_CELLS;
+	const int wCell = ceil(width / nCols);
+	const int hCell = ceil(height / nRows);
 
+	for (int i = 0; i < nRows; i++)
+	{
+		// #FIXYury Add clamp function
+		const float iniY = clamp(minBorderY + i * hCell - FeatureExtractor::EDGE_THRESHOLD*2, minBorderY, maxBorderY);
+		const float maxY = clamp(iniY + hCell + FeatureExtractor::EDGE_THRESHOLD * 2, minBorderY, maxBorderY);
 
-int main(int argc, const char * argv[]) {
-	// ------------- Configuration ------------
-	//constexpr int warmups = 30;
-	constexpr int runs = 100;
-	constexpr int numkps = 2000;
-	constexpr bool multithread = true;
-	constexpr char name[] = "../pipe.jpg";
+		for (int j = 0; j < nCols; j++)
+		{
+			const float iniX = clamp(minBorderX + j * wCell - FeatureExtractor::EDGE_THRESHOLD * 2, minBorderX, maxBorderX);
+			const float maxX = clamp(iniX + wCell + FeatureExtractor::EDGE_THRESHOLD * 2, minBorderX, maxBorderX);
+			std::vector<cv::KeyPoint> CellPOI;
+			_orbHigh->detect(_cv_image.rowRange(iniY, maxY).colRange(iniX, maxX), CellPOI, _cv_mask.rowRange(iniY, maxY).colRange(iniX, maxX));
+			if (CellPOI.size() < 10)
+			{
+				_orbLow->detect(_cv_image.rowRange(iniY, maxY).colRange(iniX, maxX), CellPOI, _cv_mask.rowRange(iniY, maxY).colRange(iniX, maxX));
+			}
 
-	int n_runs = 10;
-	// --------------------------------
-
-
-	// ------------- Image Read ------------
-	cv::Mat image = cv::imread(name, CV_LOAD_IMAGE_GRAYSCALE);
-	if (!image.data) {
-		std::cerr << "ERROR: failed to open image. Aborting." << std::endl;
-		return EXIT_FAILURE;
-	}
-	// --------------------------------
-	
-	
-	int edge_treshold = 36; // THIS VALUE IS IMPORTANT !!!
-	cv::Ptr<cv::ORB> orb = cv::ORB::create(numkps, 1.2f, 8, edge_treshold, 0, 2, cv::ORB::HARRIS_SCORE, 31, 20); //
-	std::vector<cv::KeyPoint> keypoints;
-	std::vector<cv::KeyPoint> keypoints1;
-	cv::Mat descriptors;
-	orb->setMaxFeatures(numkps);
-
-	// ------------- Interst Point detector (opencv) ------------
-	high_resolution_clock::time_point t0 = high_resolution_clock::now();
-	for (int i = 0; i < n_runs; ++i){
-		orb->detect(image, keypoints);
-	}
-	high_resolution_clock::time_point t1 = high_resolution_clock::now();
-	for (int i = 0; i < n_runs; ++i){
-		orb->compute(image, keypoints,descriptors);
-	}
-	high_resolution_clock::time_point t2 = high_resolution_clock::now();
-	//std::cout << "Interst Point detector (opencv): " << static_cast<double>((t1 - t0).count()) / (double)(n_runs) * 1e-6 <<  "ms" << std::endl;
-	//std::cout << "Descriptor (opencv): " << static_cast<double>((t2 - t1).count()) / (double)(n_runs) * 1e-6 <<  "ms" << std::endl;
-	std::cout << "Interst Point detector(" << static_cast<double>((t1 - t0).count()) / (double)(n_runs) * 1e-6 
-			  << ") and descriptor (" << static_cast<double>((t2 - t1).count()) / (double)(n_runs) * 1e-6 
-			  << ") (seperated - opencv): " << static_cast<double>((t2 - t0).count()) / (double)(n_runs) * 1e-6 <<  "ms" << std::endl;
-	// -----------------------------------------------------------
-	
-	// ------------- Interst Point detector and descriptor (opencv) ------------
-	t0 = high_resolution_clock::now();
-	for (int i = 0; i < n_runs; ++i){
-		orb->detectAndCompute(image, cv::noArray(), keypoints1,descriptors);
-	}
-	t1 = high_resolution_clock::now();
-	std::cout << "Interst Point detector and descriptor (jointed - opencv): " << static_cast<double>((t1 - t0).count()) / (double)(n_runs) * 1e-6 <<  "ms" << std::endl;
-	// -----------------------------------------------------------
-
-#ifdef USE_LATCH
-	// ------------- LATCH ------------
-	uint64_t* desc = new uint64_t[8 * keypoints.size()];
-	// For testing... Force values to zero. 
-	for (int i = 0; i < 8 * keypoints.size(); ++i) {
-		desc[i] = 0;
-	}
-
-	high_resolution_clock::time_point start1 = high_resolution_clock::now();
-	for (int i = 0; i < runs; ++i) LATCH<multithread>(image.data, image.cols, image.rows, static_cast<int>(image.step), keypoints, desc);
-	high_resolution_clock::time_point end1 = high_resolution_clock::now();
-	// --------------------------------
-	
-	
-
-	//std::cout << std::endl << "LATCH (warmup) took " << static_cast<double>((end0 - start0).count()) * 1e-3 / (static_cast<double>(warmups) * static_cast<double>(kps.size())) << " us per desc over " << kps.size() << " desc" << (kps.size() == 1 ? "." : "s.") << std::endl << std::endl;
-	std::cout << std::endl << "LATCH (after) took " << static_cast<double>((end1 - start1).count()) * 1e-3 / (static_cast<double>(runs) * static_cast<double>(keypoints.size())) << " us per desc over " << keypoints.size() << " desc" << (keypoints.size() == 1 ? "." : "s.") << std::endl << std::endl;
-
-	// TESTING ///////////////////
-	int print_desc_idx = 0; // keypoints_class.size()
-	std::cout << "argc:" << argc << std::endl;
-	if (argc > 1) {
-		print_desc_idx = std::atoi(argv[1]);
-	}
-	std::cout << "Select keypoint: " << argv[1] << std::endl;
-
-	// ------------- FeatureExtractor Class ------------
-	FeatureExtractor feature_extractor = FeatureExtractor(numkps);
-	
-
-	Eigen::Matrix<uint8_t,Eigen::Dynamic,Eigen::Dynamic> eig_image;
-	cv::cv2eigen(image,eig_image);
-	t0 = high_resolution_clock::now();
-	for (int i = 0; i < n_runs; ++i){
-		feature_extractor.detect_interest_points(eig_image);
-	}
-	t1 = high_resolution_clock::now();
-
-	std::vector<cv::KeyPoint> keypoints_class = feature_extractor._keypoints;
-
-	Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> eigen_desc;
-	eigen_desc = feature_extractor.compute_descriptor(true,print_desc_idx);
-	
-
-	std::cout << "Interst Point detector (Class) " << static_cast<double>((t1 - t0).count()) / (double)(n_runs) * 1e-6 <<  "ms" << std::endl;
-	// -----------------------------------------------------------
-
-	
-
-	// LATCH ORIGINAL //////////////////////////////////////////////
-	std::cout << "Descriptor (LATCH original): " << print_desc_idx << "/" << keypoints_class.size()-1 << std::endl;
-	int shift = print_desc_idx*8;
-	for (int i = 0; i < 8; ++i) {
-		std::cout << std::bitset<64>(desc[i+shift]) << std::endl;
-	}
-	std::cout << std::endl;
-
-	// LATCH CLASS (FLIPPED) /////////////////////////////////////////////////	
-	std::cout << "LATCH (FLIPPED)" << std::endl;
-	for (int i = 0; i < 8; ++i) {
-		for (int ii = 0; ii < 8; ++ii) {
-			std::cout << std::bitset<8>(eigen_desc(i*8+7-ii,print_desc_idx));
+			for (std::vector<cv::KeyPoint>::iterator vit = CellPOI.begin(); vit != CellPOI.end(); vit++)
+			{
+				(*vit).pt.x += iniX;
+				(*vit).pt.y += iniY;
+				_keypoints.push_back(*vit);
+			}
 		}
-		std::cout << std::endl; 
 	}
-	std::cout << std::endl;
-
-	long long total = 0;
-	for (size_t i = 0; i < 8 * keypoints_class.size(); ++i) total += desc[i];
-	std::cout << "Checksum: " << std::hex << total << std::endl << std::endl;
-#endif
-	
 }
+
+//
+//
+//int main(int argc, const char * argv[]) {
+//	// ------------- Configuration ------------
+//	//constexpr int warmups = 30;
+//	constexpr int runs = 100;
+//	constexpr int numkps = 2000;
+//	constexpr bool multithread = true;
+//	constexpr char name[] = "../pipe.jpg";
+//
+//	int n_runs = 10;
+//	// --------------------------------
+//
+//
+//	// ------------- Image Read ------------
+//	cv::Mat image = cv::imread(name, CV_LOAD_IMAGE_GRAYSCALE);
+//	if (!image.data) {
+//		std::cerr << "ERROR: failed to open image. Aborting." << std::endl;
+//		return EXIT_FAILURE;
+//	}
+//	// --------------------------------
+//	
+//	
+//	int edge_treshold = 36; // THIS VALUE IS IMPORTANT !!!
+//	cv::Ptr<cv::ORB> orb = cv::ORB::create(numkps, 1.2f, 8, edge_treshold, 0, 2, cv::ORB::HARRIS_SCORE, 31, 20); //
+//	std::vector<cv::KeyPoint> keypoints;
+//	std::vector<cv::KeyPoint> keypoints1;
+//	cv::Mat descriptors;
+//	orb->setMaxFeatures(numkps);
+//
+//	// ------------- Interst Point detector (opencv) ------------
+//	high_resolution_clock::time_point t0 = high_resolution_clock::now();
+//	for (int i = 0; i < n_runs; ++i){
+//		orb->detect(image, keypoints);
+//	}
+//	high_resolution_clock::time_point t1 = high_resolution_clock::now();
+//	for (int i = 0; i < n_runs; ++i){
+//		orb->compute(image, keypoints,descriptors);
+//	}
+//	high_resolution_clock::time_point t2 = high_resolution_clock::now();
+//	//std::cout << "Interst Point detector (opencv): " << static_cast<double>((t1 - t0).count()) / (double)(n_runs) * 1e-6 <<  "ms" << std::endl;
+//	//std::cout << "Descriptor (opencv): " << static_cast<double>((t2 - t1).count()) / (double)(n_runs) * 1e-6 <<  "ms" << std::endl;
+//	std::cout << "Interst Point detector(" << static_cast<double>((t1 - t0).count()) / (double)(n_runs) * 1e-6 
+//			  << ") and descriptor (" << static_cast<double>((t2 - t1).count()) / (double)(n_runs) * 1e-6 
+//			  << ") (seperated - opencv): " << static_cast<double>((t2 - t0).count()) / (double)(n_runs) * 1e-6 <<  "ms" << std::endl;
+//	// -----------------------------------------------------------
+//	
+//	// ------------- Interst Point detector and descriptor (opencv) ------------
+//	t0 = high_resolution_clock::now();
+//	for (int i = 0; i < n_runs; ++i){
+//		orb->detectAndCompute(image, cv::noArray(), keypoints1,descriptors);
+//	}
+//	t1 = high_resolution_clock::now();
+//	std::cout << "Interst Point detector and descriptor (jointed - opencv): " << static_cast<double>((t1 - t0).count()) / (double)(n_runs) * 1e-6 <<  "ms" << std::endl;
+//	// -----------------------------------------------------------
+//
+//#ifdef USE_LATCH
+//	// ------------- LATCH ------------
+//	uint64_t* desc = new uint64_t[8 * keypoints.size()];
+//	// For testing... Force values to zero. 
+//	for (int i = 0; i < 8 * keypoints.size(); ++i) {
+//		desc[i] = 0;
+//	}
+//
+//	high_resolution_clock::time_point start1 = high_resolution_clock::now();
+//	for (int i = 0; i < runs; ++i) LATCH<multithread>(image.data, image.cols, image.rows, static_cast<int>(image.step), keypoints, desc);
+//	high_resolution_clock::time_point end1 = high_resolution_clock::now();
+//	// --------------------------------
+//	
+//	
+//
+//	//std::cout << std::endl << "LATCH (warmup) took " << static_cast<double>((end0 - start0).count()) * 1e-3 / (static_cast<double>(warmups) * static_cast<double>(kps.size())) << " us per desc over " << kps.size() << " desc" << (kps.size() == 1 ? "." : "s.") << std::endl << std::endl;
+//	std::cout << std::endl << "LATCH (after) took " << static_cast<double>((end1 - start1).count()) * 1e-3 / (static_cast<double>(runs) * static_cast<double>(keypoints.size())) << " us per desc over " << keypoints.size() << " desc" << (keypoints.size() == 1 ? "." : "s.") << std::endl << std::endl;
+//
+//	// TESTING ///////////////////
+//	int print_desc_idx = 0; // keypoints_class.size()
+//	std::cout << "argc:" << argc << std::endl;
+//	if (argc > 1) {
+//		print_desc_idx = std::atoi(argv[1]);
+//	}
+//	std::cout << "Select keypoint: " << argv[1] << std::endl;
+//
+//	// ------------- FeatureExtractor Class ------------
+//	FeatureExtractor feature_extractor = FeatureExtractor(numkps);
+//	
+//
+//	Eigen::Matrix<uint8_t,Eigen::Dynamic,Eigen::Dynamic> eig_image;
+//	cv::cv2eigen(image,eig_image);
+//	t0 = high_resolution_clock::now();
+//	for (int i = 0; i < n_runs; ++i){
+//		feature_extractor.detect_interest_points(eig_image);
+//	}
+//	t1 = high_resolution_clock::now();
+//
+//	std::vector<cv::KeyPoint> keypoints_class = feature_extractor._keypoints;
+//
+//	Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> eigen_desc;
+//	eigen_desc = feature_extractor.compute_descriptor(true,print_desc_idx);
+//	
+//
+//	std::cout << "Interst Point detector (Class) " << static_cast<double>((t1 - t0).count()) / (double)(n_runs) * 1e-6 <<  "ms" << std::endl;
+//	// -----------------------------------------------------------
+//
+//	
+//
+//	// LATCH ORIGINAL //////////////////////////////////////////////
+//	std::cout << "Descriptor (LATCH original): " << print_desc_idx << "/" << keypoints_class.size()-1 << std::endl;
+//	int shift = print_desc_idx*8;
+//	for (int i = 0; i < 8; ++i) {
+//		std::cout << std::bitset<64>(desc[i+shift]) << std::endl;
+//	}
+//	std::cout << std::endl;
+//
+//	// LATCH CLASS (FLIPPED) /////////////////////////////////////////////////	
+//	std::cout << "LATCH (FLIPPED)" << std::endl;
+//	for (int i = 0; i < 8; ++i) {
+//		for (int ii = 0; ii < 8; ++ii) {
+//			std::cout << std::bitset<8>(eigen_desc(i*8+7-ii,print_desc_idx));
+//		}
+//		std::cout << std::endl; 
+//	}
+//	std::cout << std::endl;
+//
+//	long long total = 0;
+//	for (size_t i = 0; i < 8 * keypoints_class.size(); ++i) total += desc[i];
+//	std::cout << "Checksum: " << std::hex << total << std::endl << std::endl;
+//#endif
+//	
+//}

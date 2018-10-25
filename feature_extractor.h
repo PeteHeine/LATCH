@@ -11,13 +11,16 @@ void basic_detect_interest_points(cv::Mat image, int n_features,std::vector<cv::
 class FeatureExtractor {
     
 public: 
-	ORB_EXTRACTOR::ORBextractor* orb_slam;
-    cv::Ptr<cv::ORB> orb;
+	ORB_EXTRACTOR::ORBextractor* _orb_slam;
+    cv::Ptr<cv::ORB> _orbHigh;
+	cv::Ptr<cv::ORB> _orbLow;
     std::vector<cv::KeyPoint> _keypoints;
     cv::Mat _cv_image;
     cv::Mat _cv_mask;
     int _interest_point_detector_type;
     int _n_keypoints;
+	static const int NUM_GRID_CELLS;
+	static const int EDGE_THRESHOLD;
 
 	FeatureExtractor(int n_keypoints, 
                      float scale_factor = 1.2f, 
@@ -26,7 +29,7 @@ public:
                      int threshold_low = 7,
                      int interest_point_detector_type = 0,
                      int keypoint_search_multiplier = 5);
-    //FeatureExtractor(int n_keypoints, float scale_factor       , int n_levels    , int threshold_high     , int threshold_low    ,int keypoint_search_multiplier    , int interest_point_detector_type);
+    
     
     
 
@@ -36,6 +39,7 @@ public:
     Eigen::MatrixXd detect_interest_points(Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> image);
     void set_mask(Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> mask);
     void internal_adaptive_non_maximum_suppression();
+	void inititialze_POI_on_grid();
     //std::vector<int> adaptive_non_maximum_suppression(Eigen::MatrixXd pointLocation, int numRetPoints, float tolerance, int cols, int rows);
     //void adaptive_non_maximum_suppression(Eigen::MatrixXd pointLocation, int numInPoints, int numRetPoints, float tolerance, int cols, int rows);
     Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> detect_and_compute(Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> image, bool use_latch);

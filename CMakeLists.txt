@@ -53,6 +53,9 @@ find_package(Threads REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 CONFIG REQUIRED)
 
+find_package(GTest REQUIRED)
+
+
 # Directories of .h-files
 include_directories(
 ${PROJECT_SOURCE_DIR}
@@ -74,7 +77,10 @@ ${OpenCV_LIBS}
 Threads::Threads
 )
 
+
+
 add_executable( ${PROJECT_NAME}
+main_latch.cpp
 feature_extractor.h
 feature_extractor.cpp
 ORBextractor.h
@@ -83,3 +89,12 @@ ORBextractor.cpp)
 target_link_libraries( ${PROJECT_NAME}
 ${OpenCV_LIBS}
 Threads::Threads)
+
+
+enable_testing()
+add_executable(test_feature_extractor test_feature_extractor.cpp feature_extractor.h
+feature_extractor.cpp ORBextractor.h ORBextractor.cpp)
+
+target_link_libraries(test_feature_extractor PRIVATE GTest::GTest GTest::Main)
+target_link_libraries(test_feature_extractor ${OpenCV_LIBS})
+#add_test(NAME that-test-I-made COMMAND runUnitTests)
