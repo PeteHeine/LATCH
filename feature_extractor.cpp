@@ -227,7 +227,8 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_
 		return eigen_desc;
 	}
 	
-#if 0	}
+#if 0
+}
 	// Latch-based (CURRENTLY NOT WORKING)
 	else {
 		if((_interest_point_detector_type == 0) || (_interest_point_detector_type == 1)){

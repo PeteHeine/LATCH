@@ -55,7 +55,6 @@ find_package(Eigen3 CONFIG REQUIRED)
 
 find_package(GTest REQUIRED)
 
-
 # Directories of .h-files
 include_directories(
 ${PROJECT_SOURCE_DIR}
