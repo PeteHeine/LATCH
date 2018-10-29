@@ -296,7 +296,10 @@ Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic> FeatureExtractor::detect_
 	
 	return eigen_desc;
 }
-
+// https://www.sciencedirect.com/science/article/pii/S016786551830062X
+// paper: Efficient adaptive non-maximal suppression algorithms for homogeneous spatial keypoint distribution
+// https://github.com/BAILOOL/ANMS-Codes
+// TODO: Add the license probably.
 void FeatureExtractor::internal_adaptive_non_maximum_suppression(){
 //void FeatureExtractor::adaptive_non_maximum_suppression(Eigen::MatrixXd pointLocation, int numInPoints, int numRetPoints, float tolerance, int cols, int rows){
 	//std::cout << "Function called successfully " << std::endl;
